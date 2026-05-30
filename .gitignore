@@ -1,0 +1,22 @@
+## Ignore Visual Studio / MSBuild / .NET output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Ignore IDE files
+.vs/
+.idea/
+*.userprefs
+
+## Ignore OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+## Ignore project specific settings if any
+settings.json
