@@ -220,6 +220,17 @@ public class FormMain : Form
         pnlSidebar.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Tree View
         splitWorkspace.Panel1.Controls.Add(pnlSidebar);
 
+        var pnlSidebarHeader = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0)
+        };
+        pnlSidebarHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // Header Label
+        pnlSidebarHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120)); // Copy Button
+
         var lblFilesHeader = new Label
         {
             Text = "📂 WORKSPACE EXPLORER",
@@ -228,7 +239,24 @@ public class FormMain : Form
             Font = Theme.HeaderFont,
             TextAlign = ContentAlignment.MiddleLeft
         };
-        pnlSidebar.Controls.Add(lblFilesHeader, 0, 0);
+        pnlSidebarHeader.Controls.Add(lblFilesHeader, 0, 0);
+
+        var btnCopyContext = new Button
+        {
+            Text = "📋 Copy Context",
+            Dock = DockStyle.Fill,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Theme.Surface,
+            ForeColor = Theme.TextSecondary,
+            Font = new Font(Theme.RegularFont.FontFamily, 7.5F, FontStyle.Bold),
+            Cursor = Cursors.Hand
+        };
+        btnCopyContext.FlatAppearance.BorderColor = Theme.Border;
+        btnCopyContext.FlatAppearance.BorderSize = 1;
+        btnCopyContext.Click += btnCopyContext_Click;
+        pnlSidebarHeader.Controls.Add(btnCopyContext, 1, 0);
+
+        pnlSidebar.Controls.Add(pnlSidebarHeader, 0, 0);
 
         _tvFiles = new TreeView
         {
@@ -238,9 +266,11 @@ public class FormMain : Form
             LineColor = Theme.Border,
             BorderStyle = BorderStyle.None,
             Font = Theme.RegularFont,
-            Indent = 15
+            Indent = 15,
+            CheckBoxes = true
         };
         _tvFiles.NodeMouseDoubleClick += tvFiles_NodeMouseDoubleClick;
+        _tvFiles.AfterCheck += tvFiles_AfterCheck;
         pnlSidebar.Controls.Add(_tvFiles, 0, 1);
 
         // 5. Main Splitter (Top: DeepSeek WebView2 + File Viewer, Bottom: Console Logs)
@@ -939,6 +969,89 @@ public class FormMain : Form
             {
                 Log($"[Error opening file]: {ex.Message}");
             }
+        }
+    }
+
+    private bool _isUpdatingCheck = false;
+    private void tvFiles_AfterCheck(object? sender, TreeViewEventArgs e)
+    {
+        if (e.Node == null || _isUpdatingCheck) return;
+        _isUpdatingCheck = true;
+        try
+        {
+            UpdateChildChecks(e.Node, e.Node.Checked);
+        }
+        finally
+        {
+            _isUpdatingCheck = false;
+        }
+    }
+
+    private void UpdateChildChecks(TreeNode node, bool isChecked)
+    {
+        foreach (TreeNode child in node.Nodes)
+        {
+            child.Checked = isChecked;
+            UpdateChildChecks(child, isChecked);
+        }
+    }
+
+    private void btnCopyContext_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrEmpty(_workspacePath))
+        {
+            MessageBox.Show("Please open a workspace folder first.", "Workspace Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var checkedFiles = new List<string>();
+        foreach (TreeNode node in _tvFiles.Nodes)
+        {
+            CollectCheckedFiles(node, checkedFiles);
+        }
+
+        if (checkedFiles.Count == 0)
+        {
+            MessageBox.Show("Please select one or more files in the workspace explorer first.", "No Files Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        try
+        {
+            var sb = new StringBuilder();
+            foreach (var file in checkedFiles)
+            {
+                if (File.Exists(file))
+                {
+                    string content = File.ReadAllText(file);
+                    string relPath = Path.GetRelativePath(_workspacePath, file);
+                    sb.AppendLine($"// FILE: {relPath}");
+                    sb.AppendLine("```");
+                    sb.AppendLine(content);
+                    sb.AppendLine("```");
+                    sb.AppendLine();
+                }
+            }
+
+            Clipboard.SetText(sb.ToString());
+            MessageBox.Show($"Successfully copied context for {checkedFiles.Count} files to clipboard!", "Context Copied", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Error copying files to clipboard: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void CollectCheckedFiles(TreeNode node, List<string> files)
+    {
+        string path = node.Tag?.ToString() ?? "";
+        if (node.Checked && File.Exists(path))
+        {
+            files.Add(path);
+        }
+        foreach (TreeNode child in node.Nodes)
+        {
+            CollectCheckedFiles(child, files);
         }
     }
 
