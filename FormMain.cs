@@ -26,6 +26,7 @@ public class FormMain : Form
     private Button _btnOpenFolder = null!;
     private Button _btnInitialize = null!;
     private Button _btnRerunTool = null!;
+    private CheckBox _chkBuildMode = null!;
     private TreeView _tvFiles = null!;
     private WebView2 _wvDeepSeek = null!;
     private RichTextBox _rtbLogs = null!;
@@ -74,7 +75,7 @@ public class FormMain : Form
         var pnlHeader = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 7,
+            ColumnCount = 8,
             RowCount = 1,
             BackColor = Theme.Sidebar,
             Padding = new Padding(8, 6, 8, 6),
@@ -83,6 +84,7 @@ public class FormMain : Form
         pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130)); // Open Folder Button
         pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150)); // Initialize Button
         pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170)); // Rerun Button
+        pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160)); // Build Mode Button
         pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));  // SQL Label
         pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 350)); // SQL TextBox
         pnlHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));  // Workspace text
@@ -134,6 +136,24 @@ public class FormMain : Form
         _btnRerunTool.Click += btnRerunTool_Click;
         pnlHeader.Controls.Add(_btnRerunTool, 2, 0);
 
+        _chkBuildMode = new CheckBox
+        {
+            Text = "🔨 Build Mode: OFF",
+            Dock = DockStyle.Fill,
+            FlatStyle = FlatStyle.Flat,
+            Appearance = Appearance.Button,
+            BackColor = Theme.Surface,
+            ForeColor = Theme.TextSecondary,
+            Font = Theme.HeaderFont,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            Checked = false
+        };
+        _chkBuildMode.FlatAppearance.BorderColor = Theme.Border;
+        _chkBuildMode.FlatAppearance.BorderSize = 1;
+        _chkBuildMode.CheckedChanged += ChkBuildMode_CheckedChanged;
+        pnlHeader.Controls.Add(_chkBuildMode, 3, 0);
+
         var lblSql = new Label
         {
             Text = "🔌 SQL DB:",
@@ -142,7 +162,7 @@ public class FormMain : Form
             ForeColor = Theme.TextSecondary,
             Font = Theme.HeaderFont
         };
-        pnlHeader.Controls.Add(lblSql, 3, 0);
+        pnlHeader.Controls.Add(lblSql, 4, 0);
 
         _txtSqlConnection = new TextBox
         {
@@ -153,7 +173,7 @@ public class FormMain : Form
             ForeColor = Theme.TextMain,
             BorderStyle = BorderStyle.FixedSingle
         };
-        pnlHeader.Controls.Add(_txtSqlConnection, 4, 0);
+        pnlHeader.Controls.Add(_txtSqlConnection, 5, 0);
 
         _lblWorkspaceStatus = new Label
         {
@@ -164,7 +184,7 @@ public class FormMain : Form
             Font = Theme.HeaderFont,
             Padding = new Padding(10, 0, 0, 0)
         };
-        pnlHeader.Controls.Add(_lblWorkspaceStatus, 5, 0);
+        pnlHeader.Controls.Add(_lblWorkspaceStatus, 6, 0);
 
         _lblStatusText = new Label
         {
@@ -174,7 +194,7 @@ public class FormMain : Form
             ForeColor = Theme.Success,
             Font = Theme.HeaderFont
         };
-        pnlHeader.Controls.Add(_lblStatusText, 6, 0);
+        pnlHeader.Controls.Add(_lblStatusText, 7, 0);
 
         // 3. Workspace Splitter (Left: Sidebar, Right: Main Views)
         var splitWorkspace = new SplitContainer
@@ -373,6 +393,7 @@ public class FormMain : Form
             // Injected automation script that runs inside DeepSeek web interface
             string script = @"
 (function() {
+    window.buildModeDisabled = true;
     let currentTask = null;
     const executedSignatures = new Set();
 
@@ -465,9 +486,9 @@ public class FormMain : Form
         };
     }
 
-    // Periodically search for tool calls in assistant answers
     function scanForToolCalls() {
         try {
+            if (window.buildModeDisabled) return;
             if (!document.body) return;
 
             const messages = document.querySelectorAll('.ds-markdown');
@@ -913,6 +934,31 @@ public class FormMain : Form
         }
     }
 
+    private void ChkBuildMode_CheckedChanged(object? sender, EventArgs e)
+    {
+        if (_chkBuildMode.Checked)
+        {
+            _chkBuildMode.Text = "⚡ Build Mode: ON";
+            _chkBuildMode.BackColor = Theme.Success;
+            _chkBuildMode.ForeColor = Color.White;
+        }
+        else
+        {
+            _chkBuildMode.Text = "🔨 Build Mode: OFF";
+            _chkBuildMode.BackColor = Theme.Surface;
+            _chkBuildMode.ForeColor = Theme.TextSecondary;
+        }
+
+        try
+        {
+            if (_wvDeepSeek.CoreWebView2 != null)
+            {
+                _wvDeepSeek.CoreWebView2.ExecuteScriptAsync($"window.buildModeDisabled = {!_chkBuildMode.Checked};");
+            }
+        }
+        catch { }
+    }
+
     private async void btnInitialize_Click(object? sender, EventArgs e)
     {
         if (string.IsNullOrEmpty(_workspacePath))
@@ -920,6 +966,8 @@ public class FormMain : Form
             MessageBox.Show("Please open a workspace folder first.", "Workspace Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+
+        _chkBuildMode.Checked = true;
 
         string fileMap = _toolSystem.ListDirectory(_workspacePath);
 
