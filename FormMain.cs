@@ -698,6 +698,14 @@ public class FormMain : Form
 
             await _wvDeepSeek.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(script);
             _wvDeepSeek.WebMessageReceived += WvDeepSeek_WebMessageReceived;
+            _wvDeepSeek.NavigationCompleted += (s, args) =>
+            {
+                try
+                {
+                    _wvDeepSeek.CoreWebView2.ExecuteScriptAsync($"window.buildModeDisabled = {!_chkBuildMode.Checked};");
+                }
+                catch { }
+            };
             _wvDeepSeek.CoreWebView2.Navigate("https://chat.deepseek.com");
             Log("Loaded DeepSeek interface in WebView2.");
         }
@@ -1077,6 +1085,7 @@ Here is the current directory structure:
         
         string jsCode = $@"
 (function() {{
+    window.buildModeDisabled = false;
     function logToHost(msg) {{
         try {{
             window.chrome.webview.postMessage({{ type: 'log', message: '[Initialize JS] ' + msg }});
