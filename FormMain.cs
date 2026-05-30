@@ -777,6 +777,17 @@ public class FormMain : Form
                     if (string.IsNullOrEmpty(command)) return "Error: Missing SQL query statement.";
                     return _toolSystem.ExecuteSql(_txtSqlConnection.Text, command);
 
+                case "search_code":
+                    if (string.IsNullOrEmpty(command)) return "Error: Missing search query.";
+                    return _toolSystem.SearchCode(_workspacePath, command);
+
+                case "web_fetch":
+                    if (string.IsNullOrEmpty(command)) return "Error: Missing URL to fetch.";
+                    return await _toolSystem.WebFetchAsync(command);
+
+                case "get_db_schema":
+                    return _toolSystem.GetDbSchema(_txtSqlConnection.Text);
+
                 default:
                     return $"Error: Unknown tool '{name}' requested.";
             }
@@ -983,6 +994,25 @@ Here is the current directory structure:
     <tool name=""execute_sql"">
       <command>SELECT TOP 10 * FROM INFORMATION_SCHEMA.TABLES</command>
     </tool>
+    ```
+
+    7. Search codebase (Grep) recursively for a query string:
+    ```xml
+    <tool name=""search_code"">
+      <command>SearchQueryString</command>
+    </tool>
+    ```
+
+    8. Fetch a URL and parse it to simplified text content (e.g. read API docs):
+    ```xml
+    <tool name=""web_fetch"">
+      <command>https://example.com/docs</command>
+    </tool>
+    ```
+
+    9. Export the database schema (tables, columns, types, primary keys) of the active SQL database:
+    ```xml
+    <tool name=""get_db_schema""></tool>
     ```
 
     ### RULES & GUIDELINES:

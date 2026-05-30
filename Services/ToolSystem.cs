@@ -265,6 +265,166 @@ public class ToolSystem
         }
     }
 
+    public string SearchCode(string rootPath, string query)
+    {
+        if (string.IsNullOrEmpty(rootPath) || !Directory.Exists(rootPath))
+            return "Error: Directory does not exist.";
+        if (string.IsNullOrEmpty(query))
+            return "Error: Search query cannot be empty.";
+
+        try
+        {
+            var files = Directory.GetFileSystemEntries(rootPath, "*", SearchOption.AllDirectories)
+                .Where(f => !IsIgnored(f, rootPath) && File.Exists(f))
+                .ToList();
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"SEARCH RESULTS FOR '{query}':");
+            int matchCount = 0;
+
+            foreach (var file in files)
+            {
+                var lines = File.ReadAllLines(file);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (lines[i].Contains(query, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        var relativePath = Path.GetRelativePath(rootPath, file);
+                        sb.AppendLine($"{relativePath}:{i + 1}: {lines[i].Trim()}");
+
+                        if (matchCount >= 50)
+                        {
+                            sb.AppendLine("Capped at 50 results. Please narrow down your search.");
+                            return sb.ToString();
+                        }
+                    }
+                }
+            }
+
+            if (matchCount == 0)
+            {
+                sb.AppendLine("(No matches found)");
+            }
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"Error performing search: {ex.Message}";
+        }
+    }
+
+    private static readonly System.Net.Http.HttpClient _httpClient = new();
+
+    public async Task<string> WebFetchAsync(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return "Error: URL is empty.";
+
+        try
+        {
+            // Set User-Agent to avoid blocks
+            _httpClient.DefaultRequestHeaders.UserAgent.Clear();
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+            var response = await _httpClient.GetStringAsync(url);
+            
+            // Clean HTML tags to return readable text
+            string text = System.Text.RegularExpressions.Regex.Replace(response, "<script[^>]*>[\\s\\S]*?</script>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            text = System.Text.RegularExpressions.Regex.Replace(text, "<style[^>]*>[\\s\\S]*?</style>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            text = System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", " ");
+            text = System.Net.WebUtility.HtmlDecode(text);
+            
+            // Format whitespace
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+            
+            if (text.Length > 8000)
+            {
+                text = text.Substring(0, 8000) + "\n\n[Content truncated due to length limits]";
+            }
+            return text;
+        }
+        catch (Exception ex)
+        {
+            return $"Error fetching URL: {ex.Message}";
+        }
+    }
+
+    public string GetDbSchema(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+            return "Error: SQL Connection string is empty.";
+
+        try
+        {
+            using var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
+            connection.Open();
+
+            // Query tables and columns, showing type info and primary key flags
+            string query = @"
+                SELECT 
+                    t.TABLE_NAME,
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    CASE WHEN c.CHARACTER_MAXIMUM_LENGTH IS NOT NULL THEN '(' + CAST(c.CHARACTER_MAXIMUM_LENGTH AS VARCHAR) + ')' ELSE '' END as Length,
+                    c.IS_NULLABLE,
+                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 'PK' ELSE '' END as KeyType
+                FROM INFORMATION_SCHEMA.TABLES t
+                INNER JOIN INFORMATION_SCHEMA.COLUMNS c ON t.TABLE_NAME = c.TABLE_NAME
+                LEFT JOIN (
+                    SELECT kcu.TABLE_NAME, kcu.COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                    INNER JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ON kcu.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+                    WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                ) pk ON t.TABLE_NAME = pk.TABLE_NAME AND c.COLUMN_NAME = pk.COLUMN_NAME
+                WHERE t.TABLE_TYPE = 'BASE TABLE'
+                ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION;";
+
+            using var command = connection.CreateCommand();
+            command.CommandText = query;
+
+            using var reader = command.ExecuteReader();
+            var dt = new System.Data.DataTable();
+            dt.Load(reader);
+
+            if (dt.Rows.Count == 0)
+            {
+                return "Database contains no tables or schemas could not be retrieved.";
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("# DATABASE SCHEMA DESCRIPTION");
+            string currentTable = "";
+
+            foreach (System.Data.DataRow row in dt.Rows)
+            {
+                string tableName = row["TABLE_NAME"]?.ToString() ?? "";
+                string columnName = row["COLUMN_NAME"]?.ToString() ?? "";
+                string dataType = row["DATA_TYPE"]?.ToString() ?? "";
+                string length = row["Length"]?.ToString() ?? "";
+                string isNullable = row["IS_NULLABLE"]?.ToString() ?? "YES";
+                string keyType = row["KeyType"]?.ToString() ?? "";
+
+                if (tableName != currentTable)
+                {
+                    currentTable = tableName;
+                    sb.AppendLine();
+                    sb.AppendLine($"## Table: {currentTable}");
+                }
+
+                string keyIndicator = !string.IsNullOrEmpty(keyType) ? " **[Primary Key]**" : "";
+                string nullableIndicator = isNullable == "NO" ? "NOT NULL" : "NULL";
+                sb.AppendLine($"- `{columnName}`: {dataType}{length} ({nullableIndicator}){keyIndicator}");
+            }
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"Error retrieving database schema: {ex.Message}";
+        }
+    }
+
     private bool IsIgnored(string fullPath, string rootPath)
     {
         var relative = Path.GetRelativePath(rootPath, fullPath).ToLower();
