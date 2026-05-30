@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -28,6 +29,7 @@ public class FormMain : Form
     private Button _btnRerunTool = null!;
     private CheckBox _chkBuildMode = null!;
     private TreeView _tvFiles = null!;
+    private ContextMenuStrip _explorerContextMenu = null!;
     private WebView2 _wvDeepSeek = null!;
     private RichTextBox _rtbLogs = null!;
     private Label _lblStatusText = null!;
@@ -272,6 +274,32 @@ public class FormMain : Form
         _tvFiles.NodeMouseDoubleClick += tvFiles_NodeMouseDoubleClick;
         _tvFiles.AfterCheck += tvFiles_AfterCheck;
         pnlSidebar.Controls.Add(_tvFiles, 0, 1);
+
+        // Context Menu Setup
+        _explorerContextMenu = new ContextMenuStrip();
+        
+        var menuOpenExplorer = new ToolStripMenuItem("📂 Open in File Explorer", null, btnOpenExplorer_Click);
+        var menuOpenVs = new ToolStripMenuItem("💻 Open in Visual Studio", null, btnOpenVs_Click);
+        
+        var menuGitOptions = new ToolStripMenuItem("📌 Git Options");
+        var gitStatusItem = new ToolStripMenuItem("Status", null, gitStatus_Click);
+        var gitCommitPushItem = new ToolStripMenuItem("Commit & Push...", null, gitCommitPush_Click);
+        menuGitOptions.DropDownItems.Add(gitStatusItem);
+        menuGitOptions.DropDownItems.Add(gitCommitPushItem);
+        
+        _explorerContextMenu.Items.Add(menuOpenExplorer);
+        _explorerContextMenu.Items.Add(menuOpenVs);
+        _explorerContextMenu.Items.Add(new ToolStripSeparator());
+        _explorerContextMenu.Items.Add(menuGitOptions);
+        
+        _tvFiles.ContextMenuStrip = _explorerContextMenu;
+        _tvFiles.NodeMouseClick += (s, ev) =>
+        {
+            if (ev.Button == MouseButtons.Right)
+            {
+                _tvFiles.SelectedNode = ev.Node;
+            }
+        };
 
         // 5. Main Splitter (Top: DeepSeek WebView2 + File Viewer, Bottom: Console Logs)
         var splitMain = new SplitContainer
@@ -1381,6 +1409,129 @@ Here is the current directory structure:
         _rtbLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
         _rtbLogs.SelectionStart = _rtbLogs.Text.Length;
         _rtbLogs.ScrollToCaret();
+    }
+
+    private void btnOpenExplorer_Click(object? sender, EventArgs e)
+    {
+        if (_tvFiles.SelectedNode == null || _tvFiles.SelectedNode.Tag == null) return;
+        string path = _tvFiles.SelectedNode.Tag.ToString() ?? "";
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                Process.Start("explorer.exe", $"/select,\"{path}\"");
+            }
+            else if (Directory.Exists(path))
+            {
+                Process.Start("explorer.exe", $"\"{path}\"");
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to open Explorer: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void btnOpenVs_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrEmpty(_workspacePath) || !Directory.Exists(_workspacePath)) return;
+
+        try
+        {
+            string[] slnFiles = Directory.GetFiles(_workspacePath, "*.sln", SearchOption.AllDirectories);
+            string targetPath = "";
+            if (slnFiles.Length > 0)
+            {
+                targetPath = slnFiles[0];
+            }
+            else
+            {
+                string[] csprojFiles = Directory.GetFiles(_workspacePath, "*.csproj", SearchOption.AllDirectories);
+                if (csprojFiles.Length > 0)
+                {
+                    targetPath = csprojFiles[0];
+                }
+            }
+
+            if (!string.IsNullOrEmpty(targetPath))
+            {
+                Log($"Launching Visual Studio for target: {Path.GetFileName(targetPath)}");
+                Process.Start(new ProcessStartInfo(targetPath) { UseShellExecute = true });
+            }
+            else
+            {
+                MessageBox.Show("No .sln or .csproj file found in this workspace.", "Project File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to launch Visual Studio: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async void gitStatus_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrEmpty(_workspacePath)) return;
+
+        Log("[Git Status] Executing command...");
+        string result = await _toolSystem.RunCommandAsync("git status", _workspacePath, outStr => Log(outStr.TrimEnd()));
+        Log($"[Git Status Complete] Output size: {result.Length} chars.");
+    }
+
+    private async void gitCommitPush_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrEmpty(_workspacePath)) return;
+
+        string commitMessage = ShowInputDialog(
+            "Enter commit message:", 
+            "Git Commit & Push", 
+            $"Savepoint: {DateTime.Now:yyyy-MM-dd HH:mm:ss}"
+        );
+
+        if (string.IsNullOrWhiteSpace(commitMessage))
+        {
+            Log("[Git Commit & Push] Cancelled by user.");
+            return;
+        }
+
+        Log($"[Git Commit & Push] Initiating stage, commit, and push...");
+        string chainedCommand = $"git add .; git commit -m \"{commitMessage.Replace("\"", "\\\"")}\"; git push";
+        string result = await _toolSystem.RunCommandAsync(chainedCommand, _workspacePath, outStr => Log(outStr.TrimEnd()));
+        Log($"[Git Commit & Push Complete] Output size: {result.Length} chars.");
+    }
+
+    private static string ShowInputDialog(string text, string caption, string defaultVal = "")
+    {
+        Form prompt = new Form()
+        {
+            Width = 400,
+            Height = 160,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            Text = caption,
+            StartPosition = FormStartPosition.CenterParent,
+            BackColor = Theme.Background,
+            ForeColor = Theme.TextMain,
+            Font = Theme.RegularFont
+        };
+        Label textLabel = new Label() { Left = 20, Top = 15, Text = text, AutoSize = true };
+        TextBox textBox = new TextBox() { Left = 20, Top = 40, Width = 340, Text = defaultVal, BorderStyle = BorderStyle.FixedSingle, BackColor = Theme.Surface, ForeColor = Theme.TextMain };
+        Button confirmation = new Button() { Text = "Ok", Left = 270, Width = 90, Top = 80, DialogResult = DialogResult.OK, FlatStyle = FlatStyle.Flat, BackColor = Theme.Surface };
+        Button cancel = new Button() { Text = "Cancel", Left = 170, Width = 90, Top = 80, DialogResult = DialogResult.Cancel, FlatStyle = FlatStyle.Flat, BackColor = Theme.Surface };
+        
+        confirmation.FlatAppearance.BorderColor = Theme.Border;
+        cancel.FlatAppearance.BorderColor = Theme.Border;
+        confirmation.ForeColor = Theme.TextMain;
+        cancel.ForeColor = Theme.TextMain;
+
+        prompt.Controls.Add(textBox);
+        prompt.Controls.Add(confirmation);
+        prompt.Controls.Add(cancel);
+        prompt.Controls.Add(textLabel);
+        prompt.AcceptButton = confirmation;
+        prompt.CancelButton = cancel;
+
+        return prompt.ShowDialog() == DialogResult.OK ? textBox.Text : "";
     }
 
     private void SetStatus(string text, Color color)
